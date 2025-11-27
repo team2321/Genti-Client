@@ -13,12 +13,12 @@ interface Message {
 
 export default function GentiChatInterface() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const [recording, setRecording] = useState(false);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [recording, setRecording] = useState(false); // 녹음 진행 중 상태
+  const [messages, setMessages] = useState<Message[]>([]); // 대화 내용 저장
+  const [isProcessing, setIsProcessing] = useState(false); // 음성 -> 텍스트 변환 진행 중 상태
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Auto scroll to bottom when new messages arrive
+  // 새로운 메시지 생성에 따라 스크롤 내려가기
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
