@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 import * as sdk from "microsoft-cognitiveservices-speech-sdk";
+/////////
+import ffmpegInstaller from "ffmpeg-static";
+/////////
 import ffmpeg from "fluent-ffmpeg";
 import fs from "fs/promises";
 import path from "path";
@@ -7,6 +10,32 @@ import os from "os";
 
 export const runtime = "nodejs";
 
+/////////
+// 👇 [추가 2] fluent-ffmpeg에게 "실행 파일은 여기에 있어!"라고 알려줍니다.
+if (ffmpegInstaller) {
+  ffmpeg.setFfmpegPath(ffmpegInstaller);
+}
+
+
+
+// Content Safety 타입 정의
+type Category = "Hate" | "SelfHarm" | "Sexual" | "Violence";
+
+interface AnalysisResult {
+  category: Category;
+  severity: number;
+}
+
+interface SafetyResponse {
+  blocklistsMatch: any[];
+  categoriesAnalysis: AnalysisResult[];
+  error?: { code: string; message: string };
+}
+/////////
+
+
+
+// API Handler
 export async function POST(req: Request) {
   let tempInputPath: string | null = null;
   let tempOutputPath: string | null = null;
@@ -73,7 +102,80 @@ export async function POST(req: Request) {
     // 결과 확인 및 반환
     if (result.reason === sdk.ResultReason.RecognizedSpeech) {
       console.log("Recognition successful:", result.text);
-      return NextResponse.json({ text: result.text });
+
+
+      /////////
+      // ============================================================
+      // 🚀 [통합 부분] 여기서 Content Safety API를 호출합니다.
+      // Python 코드의 requests.post 로직을 fetch로 변환했습니다.
+      // ============================================================
+      
+      const safetyEndpoint = process.env.AZURE_CONTENT_SAFETY_ENDPOINT!;
+      const safetyKey = process.env.AZURE_CONTENT_SAFETY_KEY!;
+      const apiVersion = "2024-09-01";
+      
+      const safetyUrl = `${safetyEndpoint}/contentsafety/text:analyze?api-version=${apiVersion}`;
+
+      const safetyResponse = await fetch(safetyUrl, {
+        method: "POST",
+        headers: {
+          "Ocp-Apim-Subscription-Key": safetyKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          // text: recognizedText, // STT 결과가 여기로 들어갑니다!
+          text: result.text, // STT 결과가 여기로 들어갑니다!
+          blocklistNames: [],
+        }),
+      });
+
+      if (!safetyResponse.ok) {
+        throw new Error(`Content Safety API Error: ${safetyResponse.statusText}`);
+      }
+
+      const safetyResult: SafetyResponse = await safetyResponse.json();
+
+      // [심판 로직] Python의 make_decision 함수 로직 구현
+      const rejectThresholds: Record<Category, number> = {
+        Hate: 4,
+        SelfHarm: 4,
+        Sexual: 4,
+        Violence: 4,
+      };
+
+      let finalAction = "Accept";
+      const actionDetails: Record<string, string> = {};
+
+      // 카테고리별 점수 확인
+      if (safetyResult.categoriesAnalysis) {
+        for (const analysis of safetyResult.categoriesAnalysis) {
+          const category = analysis.category;
+          const severity = analysis.severity;
+          const threshold = rejectThresholds[category];
+
+          let action = "Accept";
+          // 기준치 이상이면 Reject
+          if (threshold !== -1 && severity >= threshold) {
+            action = "Reject";
+            finalAction = "Reject";
+          }
+          actionDetails[category] = action;
+        }
+      }
+
+      // 최종 응답 반환
+      return NextResponse.json({
+        // text: recognizedText,
+        text: result.text,
+        safetyDecision: finalAction, // "Accept" 또는 "Reject"
+        safetyDetails: actionDetails, // 각 항목별 결과
+        rawSafetyResult: safetyResult // (디버깅용) 원본 데이터
+      });
+      /////////
+
+
+
+      // return NextResponse.json({ text: result.text });
     } else if (result.reason === sdk.ResultReason.NoMatch) {
       console.log("No speech could be recognized");
       return NextResponse.json({ text: "", error: "No speech recognized" });
