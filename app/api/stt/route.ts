@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 import * as sdk from "microsoft-cognitiveservices-speech-sdk";
-/////////
 import ffmpegInstaller from "ffmpeg-static";
-/////////
 import ffmpeg from "fluent-ffmpeg";
 import fs from "fs/promises";
 import path from "path";
@@ -53,8 +51,7 @@ interface ResponseGuide {
 
 
 // Azure OpenAI 대응 가이드 생성 함수
-async function generateResponseGuide(sttText: string): Promise<ResponseGuide | null> {
-  try {
+async function generateResponseGuide(sttText: string, safetyResult: SafetyResponse): Promise<ResponseGuide | null> {
     const apiKey = process.env.AZURE_OPENAI_KEY!;
     const endpoint = process.env.AZURE_OPENAI_ENDPOINT!;
     const deploymentName = "smu-team6-gpt-4o-mini";
@@ -91,6 +88,52 @@ async function generateResponseGuide(sttText: string): Promise<ResponseGuide | n
   "next_steps": ["2단계...", "3단계...", "4단계..."]
 }`;
 
+    const fetchOpenAI = async (inputText: string) => {
+    return await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "api-key": apiKey },
+      body: JSON.stringify({
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: `고객 발화: ${inputText}` }
+        ],
+        temperature: 0.7,
+        max_tokens: 600
+      }),
+    });
+  };
+
+  try {
+    console.log("🤖 Generating guide (Attempt 1: Raw Text)...");
+    let response = await fetchOpenAI(sttText);
+
+    if (response.status === 400) {
+      console.warn("⚠️ OpenAI blocked raw text (Content Filter). Retrying with sanitized description...");
+      const detectedCategories = safetyResult.categoriesAnalysis
+        .filter(c => c.severity > 0)
+        .map(c => `${c.category} (Severity: ${c.severity})`)
+        .join(", ");
+        
+      const sanitizedText = `(The user input was blocked by safety filters. Detected: ${detectedCategories}. Please provide a general guide for this type of aggression.)`;
+      response = await fetchOpenAI(sanitizedText);
+    }
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      console.error(`❌ OpenAI API Error (${response.status}):`, errorBody);
+      return null;
+    }
+
+    const data = await response.json();
+    const content = data.choices[0].message.content;
+    return JSON.parse(content);
+
+  } catch (error) {
+    console.error("Error generating guide:", error);
+    return null;
+  }
+
+  /*
     const response = await fetch(url, {
       method: "POST",
       headers: {
@@ -142,6 +185,8 @@ async function generateResponseGuide(sttText: string): Promise<ResponseGuide | n
     console.error("Error generating guide:", error);
     return null;
   }
+    */
+
 }
 
 
@@ -183,15 +228,26 @@ export async function POST(req: Request) {
     // 변환된 WAV 파일 읽기
     const wavBuffer = await fs.readFile(tempOutputPath);
 
-    // Azure Speech 설정
+    // Azure Speech 설정 (PushStream)
     const speechConfig = sdk.SpeechConfig.fromSubscription(
       process.env.AZURE_SPEECH_KEY!,
       process.env.AZURE_SPEECH_REGION!
     );
     speechConfig.speechRecognitionLanguage = "ko-KR"; // 한국어 설정
 
+    /*
     // WAV 버퍼를 Azure Speech SDK에 전달
     const audioConfig = sdk.AudioConfig.fromWavFileInput(wavBuffer);
+    const recognizer = new sdk.SpeechRecognizer(speechConfig, audioConfig);
+    */
+    // 1. PushStream 생성 (데이터를 밀어넣는 방식)
+    const pushStream = sdk.AudioInputStream.createPushStream();
+    // 2. 오디오 데이터를 스트림에 밀어넣음
+    pushStream.write(wavBuffer.buffer);
+    // 3. 스트림 닫기 (SDK에게 데이터가 끝났음을 명시적으로 알림)
+    pushStream.close();
+    // 4. Config에 스트림 연결
+    const audioConfig = sdk.AudioConfig.fromStreamInput(pushStream);
     const recognizer = new sdk.SpeechRecognizer(speechConfig, audioConfig);
 
     // 음성 인식 실행
@@ -245,10 +301,10 @@ export async function POST(req: Request) {
 
       // 유해성 판별
       const rejectThresholds: Record<Category, number> = {
-        Hate: 4,
-        SelfHarm: 4,
-        Sexual: 4,
-        Violence: 4,
+        Hate: 2,
+        SelfHarm: 2,
+        Sexual: 2,
+        Violence: 2,
       };
 
       let finalAction = "Accept";
@@ -277,7 +333,12 @@ export async function POST(req: Request) {
       if (finalAction === "Reject") {
         console.log("🚨 Unsafe content detected. Generating response guide...");
         // generateResponseGuide 함수 호출
-        guideResult = await generateResponseGuide(result.text);
+        guideResult = await generateResponseGuide(result.text, safetyResult);
+
+        if (guideResult) {
+          if (guideResult.current_action) guideResult.current_action = guideResult.current_action.replace(/^\d+단계:\s*/, '').trim();
+          if (guideResult.next_steps) guideResult.next_steps = guideResult.next_steps.map(step => step.replace(/^\d+단계:\s*/, '').trim());
+        }
       }
 
       // 최종 응답 반환
@@ -299,8 +360,6 @@ export async function POST(req: Request) {
       // 클라이언트에게 반환
       return NextResponse.json(responsePayload);
       // ============================================================
-
-      // return NextResponse.json({ text: result.text });
       
     } else if (result.reason === sdk.ResultReason.NoMatch) {
       console.log("No speech could be recognized");
