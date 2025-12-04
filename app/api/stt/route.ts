@@ -40,7 +40,109 @@ interface SafetyResponse {
   categoriesAnalysis: AnalysisResult[];
   error?: { code: string; message: string };
 }
+
+// OpenAI 가이드 응답 타입
+interface ResponseGuide {
+  situation: string;
+  current_action: string;
+  current_script: string;
+  next_steps: string[];
+}
 // ==========================================================================
+
+
+
+// Azure OpenAI 대응 가이드 생성 함수
+async function generateResponseGuide(sttText: string): Promise<ResponseGuide | null> {
+  try {
+    const apiKey = process.env.AZURE_OPENAI_KEY!;
+    const endpoint = process.env.AZURE_OPENAI_ENDPOINT!;
+    const deploymentName = "smu-team6-gpt-4o-mini";
+    const apiVersion = "2024-02-15-preview";
+
+    const url = `${endpoint}openai/deployments/${deploymentName}/chat/completions?api-version=${apiVersion}`;
+
+    const systemPrompt = `당신은 콜센터 상담원을 지원하는 전문 어시스턴트입니다.
+
+목적:
+- 고객의 공격적·모욕적 발화를 들은 상담원이 감정적으로 휘둘리지 않고, 회사 매뉴얼에 맞게 침착하게 대응하도록 '상황 요약'과 '단계별 응대 가이드'를 생성하는 것이 당신의 역할입니다.
+
+언어 규칙:
+- 답변은 항상 자연스러운 한국어로만 작성합니다.
+- 반말, 속어, 비속어, 영어 표현은 사용하지 않습니다.
+- 고객의 욕설·비하 표현은 절대 그대로 인용하지 않습니다.
+
+상황 요약(situation) 작성 규칙:
+- 감정을 섞지 않고, 객관적인 서술형으로 작성합니다.
+- 욕설·모욕·비하는 "심한 욕설", "모욕적인 표현", "공격적인 표현" 등으로 치환합니다.
+
+톤 & 스타일 지침:
+- 고객을 비난하거나 가르치는 느낌을 주지 않습니다.
+- 책임을 떠넘기거나 방어적으로 들리는 표현을 사용하지 않습니다.
+- 감정적인 표현은 사용하지 않습니다.
+- 항상 차분하고 공손한 존댓말을 사용합니다.
+
+출력 형식:
+- 반드시 아래 JSON 형식만 출력합니다. JSON 외 텍스트 절대 금지.
+{
+  "situation": "객관적인 상황 요약 (1-2문장)",
+  "current_action": "1단계: 지금 즉시 해야 할 행동",
+  "current_script": "1단계에 맞는 응대 문구 (1-2문장)",
+  "next_steps": ["2단계...", "3단계...", "4단계..."]
+}`;
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "api-key": apiKey,
+      },
+      body: JSON.stringify({
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: "고객 발화: XX 같은 놈들, 배송 왜 이렇게 늦어!" },
+          {
+            role: "assistant",
+            content: JSON.stringify({
+              situation: "고객이 심한 욕설을 사용하며 배송 지연에 대해 강하게 불만을 표현하고 있습니다.",
+              current_action: "1단계: 고객 감정 인정 및 사과",
+              current_script: "배송 지연으로 많이 불편하셨을 것 같습니다. 먼저 불편을 겪게 해드린 점 진심으로 사과드립니다.",
+              next_steps: ["2단계: 배송 조회 시스템 즉시 확인", "3단계: 구체적 배송 예정일 안내", "4단계: 필요시 보상 방안 제시"]
+            })
+          },
+          { role: "user", content: "고객 발화: 환불 안 해주면 가만 안 둬, 진짜 죽이고 싶네" },
+          {
+            role: "assistant",
+            content: JSON.stringify({
+              situation: "고객이 공격적인 표현과 협박성 발언을 사용하며 환불을 강하게 요청하고 있습니다.",
+              current_action: "1단계: 환불 요청 확인 및 안심시키기",
+              current_script: "환불 요청 확인했습니다. 지금 바로 환불 절차 확인해서 도와드릴 수 있는 방법을 안내드리겠습니다.",
+              next_steps: ["2단계: 환불 가능 여부 즉시 확인", "3단계: 환불 예상 기간 명확히 안내", "4단계: 욕설 지속 시 정중히 자제 요청"]
+            })
+          },
+          { role: "user", content: `고객 발화: ${sttText}` }
+        ],
+        temperature: 0.7,
+        max_tokens: 600
+      }),
+    });
+
+    if (!response.ok) {
+      console.error("OpenAI API Error:", response.statusText);
+      return null;
+    }
+
+    const data = await response.json();
+    const content = data.choices[0].message.content;
+    
+    // JSON 문자열을 객체로 파싱
+    return JSON.parse(content);
+
+  } catch (error) {
+    console.error("Error generating guide:", error);
+    return null;
+  }
+}
 
 
 
@@ -130,7 +232,6 @@ export async function POST(req: Request) {
         },
         body: JSON.stringify({
           // STT 결과
-          // text: recognizedText,
           text: result.text,
           blocklistNames: [],
         }),
@@ -142,6 +243,7 @@ export async function POST(req: Request) {
 
       const safetyResult: SafetyResponse = await safetyResponse.json();
 
+      // 유해성 판별
       const rejectThresholds: Record<Category, number> = {
         Hate: 4,
         SelfHarm: 4,
@@ -169,6 +271,15 @@ export async function POST(req: Request) {
         }
       }
 
+      // finalAction == "Reject"인 경우 OpenAI 가이드 생성
+      let guideResult: ResponseGuide | null = null;
+      
+      if (finalAction === "Reject") {
+        console.log("🚨 Unsafe content detected. Generating response guide...");
+        // generateResponseGuide 함수 호출
+        guideResult = await generateResponseGuide(result.text);
+      }
+
       // 최종 응답 반환
       const responsePayload = {
         text: result.text,
@@ -177,7 +288,9 @@ export async function POST(req: Request) {
         // 카테고리별 결과
         safetyDetails: actionDetails,
         // 원본 data
-        rawSafetyResult: safetyResult
+        rawSafetyResult: safetyResult,
+        // 가이드 결과 추가 (Accept면 null)
+        guide: guideResult
       };
 
       // JSON 출력
