@@ -55,7 +55,6 @@ interface ResponseGuide {
 // Azure OpenAI 대응 가이드 생성 함수
 async function generateResponseGuide(sttText: string): Promise<ResponseGuide | null> {
   try {
-    // ⚠️ 보안 경고: 실제 배포 시에는 반드시 process.env 변수를 사용하세요!
     const apiKey = process.env.AZURE_OPENAI_KEY!;
     const endpoint = process.env.AZURE_OPENAI_ENDPOINT!;
     const deploymentName = "smu-team6-gpt-4o-mini";
@@ -233,7 +232,6 @@ export async function POST(req: Request) {
         },
         body: JSON.stringify({
           // STT 결과
-          // text: recognizedText,
           text: result.text,
           blocklistNames: [],
         }),
