@@ -1,7 +1,8 @@
 "use client";
 
 import { useRef, useState, useEffect } from "react";
-import { toast } from "react-toastify";
+import { toast, ToastContainer } from "react-toastify";
+import "react-toastify/dist/ReactToastify.css";
 import Image from "next/image";
 import RecordBtn from "@/components/Button/RecordBtn";
 import ReportBtn from "@/components/Button/ReportBtn";
@@ -30,6 +31,7 @@ const responseGuideMock = {
 export default function GentiChatInterface() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [recordedFile, setRecordedFile] = useState<File | null>(null);
   const [callTime, setCallTime] = useState("00:02");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -40,17 +42,31 @@ export default function GentiChatInterface() {
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      toast.warning(
-        "공격적인 발언 감지\n고객님께 발언에 대한 신중성을 안내했습니다.",
-        {
-          position: "top-center",
-          autoClose: 3000,
-          hideProgressBar: false,
-          closeOnClick: true,
-          pauseOnHover: true,
-          draggable: true,
-        }
-      );
+      const agent_msg =
+        "공격적인 발언 감지\n고객님께 발언에 대한 신중성을 안내했습니다.";
+      const customer_msg =
+        "공격적인 표현이 감지되었습니다.\n차분하게 대화를 이어나가주세요.";
+
+      // Show same warning in both agent and customer view containers
+      toast.warning(agent_msg, {
+        containerId: "agent-toast",
+        position: "top-center",
+        autoClose: 3000,
+        hideProgressBar: true,
+        closeOnClick: true,
+        pauseOnHover: true,
+        draggable: true,
+      });
+
+      toast.warning(customer_msg, {
+        containerId: "customer-toast",
+        position: "top-center",
+        autoClose: 3000,
+        hideProgressBar: true,
+        closeOnClick: true,
+        pauseOnHover: true,
+        draggable: true,
+      });
     }, 2000);
 
     return () => clearTimeout(timer);
@@ -85,12 +101,27 @@ export default function GentiChatInterface() {
         setIsProcessing={setIsProcessing}
       />
 
+      {/* Agent View */}
       <div className="flex flex-col h-full">
+        {/* Toast container for Agent view (positioned near left-column center) */}
+        <ToastContainer
+          containerId="agent-toast"
+          position="top-center"
+          autoClose={3000}
+          hideProgressBar
+          closeOnClick={false}
+          draggable
+          toastClassName={() =>
+            "min-w-[360px] rounded-xl bg-white text-[#333] shadow-lg border border-[#E5E5E5] px-4 py-3 flex items-start space-x-3"
+          }
+          // bodyClassName={() => "text-sm font-semibold"}
+          icon={<RiErrorWarningFill className="text-[#C4F15A] text-4xl" />}
+          className="absolute left-[33%] transform -translate-x-1/2 whitespace-pre-line text-sm font-bold"
+        />
         {/* Header */}
         <div className="bg-[#373737] px-6 py-4 border-b border-[#939393] fixed w-full">
           <Image src="/genti-logo.svg" alt="logo" width={80} height={40} />
         </div>
-
         <div className="flex-1 overflow-y-auto px-6 py-10 min-h-full flex flex-col items-center justify-center">
           <div className="max-w-3xl w-full">
             {/* Title */}
@@ -114,7 +145,10 @@ export default function GentiChatInterface() {
                   <span>신고 가능한 발언입니다.</span>
                 </span>
               </div>
-              <ReportBtn />
+              <ReportBtn
+                audioFile={recordedFile}
+                onClearAudio={() => setRecordedFile(null)}
+              />
             </div>
             <div className="relative pt-6">
               <div className="absolute left-[11px] top-14 bottom-2 w-0.5 bg-[#C4F15A]"></div>
@@ -157,8 +191,27 @@ export default function GentiChatInterface() {
         </div>
       </div>
 
-      {/* Right Panel - Call Interface */}
+      {/* Customer view */}
       <div className="flex-1 bg-gray-700 flex flex-col items-center justify-center relative overflow-hidden">
+        {/* Toast container for Customer view (positioned near right-column center) */}
+        <ToastContainer
+          containerId="customer-toast"
+          position="top-center"
+          autoClose={3000}
+          hideProgressBar
+          pauseOnHover
+          draggable
+          toastClassName={() =>
+            "min-w-[360px] rounded-2xl bg-[#4A4A4A] text-white px-5 py-4 shadow-md flex items-start space-x-3"
+          }
+          icon={<RiErrorWarningFill className="text-[#FFCC4D] text-4xl" />}
+          className="customer-toast-container whitespace-pre-line text-sm font-bold"
+          progressClassName="!bg-white"
+          style={{
+            left: "83.33%",
+            transform: "translateX(-50%)",
+          }}
+        />
         <Image src="/call.png" width={80} height={160} alt="Call interface" />
       </div>
     </div>
