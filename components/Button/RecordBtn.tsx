@@ -2,7 +2,8 @@ import { FaMicrophone, FaStop } from "react-icons/fa";
 import { useRef, useState } from "react";
 
 interface Props {
-  onTranscription?: (text: string) => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  onTranscription?: (text: string, guide?: any) => void;
   setIsProcessing?: (v: boolean) => void;
   onAudio?: (file: File | null) => void;
 }
@@ -58,8 +59,9 @@ export default function RecordBtn({
 
           const data = await res.json();
 
-          if (data.text) {
-            onTranscription?.(data.text);
+          if (data) {
+            // data may contain { text, guide, ... }
+            onTranscription?.(data.text ?? "", data.guide ?? null);
           }
         } catch (error) {
           console.error("Error processing audio:", error);

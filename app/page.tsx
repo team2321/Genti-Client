@@ -15,6 +15,13 @@ interface Message {
   timestamp: Date;
 }
 
+interface ResponseGuide {
+  situation: string;
+  current_action: string;
+  current_script: string;
+  next_steps: string[];
+}
+
 const responseGuideMock = {
   situation:
     "고객이 심한 욕설을 사용하며 배송 지연에 대해 강하게 불만을 표현하고 있습니다.",
@@ -32,6 +39,9 @@ export default function GentiChatInterface() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [recordedFile, setRecordedFile] = useState<File | null>(null);
+  const [responseGuide, setResponseGuide] = useState<ResponseGuide | null>(
+    null
+  );
   const [callTime, setCallTime] = useState("00:02");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -72,7 +82,7 @@ export default function GentiChatInterface() {
     return () => clearTimeout(timer);
   }, []);
 
-  const handleTranscription = (text: string) => {
+  const handleTranscription = (text: string, guide?: ResponseGuide | null) => {
     const customerMessage: Message = {
       id: Date.now().toString(),
       text,
@@ -81,16 +91,28 @@ export default function GentiChatInterface() {
     };
     setMessages((prev) => [...prev, customerMessage]);
 
-    // 임시 상담원 응답
-    setTimeout(() => {
+    // If backend returned a guide, set it and use its script as agent reply
+    if (guide) {
+      setResponseGuide(guide);
       const agentMessage: Message = {
         id: (Date.now() + 1).toString(),
-        text: "이곳에 대응 스크립트 표시",
+        text: guide.current_script || "",
         isUser: true,
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, agentMessage]);
-    }, 1000);
+    } else {
+      // fallback temporary response
+      setTimeout(() => {
+        const agentMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          text: "이곳에 대응 스크립트 표시",
+          isUser: true,
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, agentMessage]);
+      }, 1000);
+    }
   };
 
   return (
@@ -99,6 +121,7 @@ export default function GentiChatInterface() {
       <RecordBtn
         onTranscription={handleTranscription}
         setIsProcessing={setIsProcessing}
+        onAudio={(f) => setRecordedFile(f)}
       />
 
       {/* Agent View */}
@@ -130,7 +153,9 @@ export default function GentiChatInterface() {
                 상황 요약
               </p>
               <p className="text-white text-lg leading-relaxed font-semibold">
-                {responseGuideMock.situation}
+                {responseGuide
+                  ? responseGuide.situation
+                  : responseGuideMock.situation}
               </p>
             </div>
 
@@ -163,18 +188,25 @@ export default function GentiChatInterface() {
                         NOW
                       </div>
                       <p className="text-lg text-white font-bold">
-                        {responseGuideMock.current_action}
+                        {responseGuide
+                          ? responseGuide.current_action
+                          : responseGuideMock.current_action}
                       </p>
                     </div>
                     {/* current_script 적용 */}
                     <div className="ml-5 mt-2 p-4 bg-[#C4F15A] text-gray-900 rounded-lg relative before:content-[''] before:absolute before:right-full before:top-7 before:border-8 before:border-transparent before:border-r-[#C4F15A] max-w-sm text-sm font-semibold">
-                      {responseGuideMock.current_script}
+                      {responseGuide
+                        ? responseGuide.current_script
+                        : responseGuideMock.current_script}
                     </div>
                   </div>
                 </div>
 
                 {/* 2. 다음 단계들 - next_steps 배열을 map으로 처리하여 반복 생성 */}
-                {responseGuideMock.next_steps.map((step, index) => (
+                {(responseGuide
+                  ? responseGuide.next_steps
+                  : responseGuideMock.next_steps
+                ).map((step, index) => (
                   <div key={index} className="relative flex items-start">
                     <div className="flex-shrink-0 w-6 h-6 rounded-full bg-[#C4F15A] z-10 mt-1"></div>
                     <div className="ml-5 flex-1 pt-0.5">
