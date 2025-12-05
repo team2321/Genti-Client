@@ -4,9 +4,14 @@ import { useRef, useState } from "react";
 interface Props {
   onTranscription?: (text: string) => void;
   setIsProcessing?: (v: boolean) => void;
+  onAudio?: (file: File | null) => void;
 }
 
-export default function RecordBtn({ onTranscription, setIsProcessing }: Props) {
+export default function RecordBtn({
+  onTranscription,
+  setIsProcessing,
+  onAudio,
+}: Props) {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const [recording, setRecording] = useState(false);
   const [isProcessingLocal, setIsProcessingLocal] = useState(false);
@@ -30,6 +35,17 @@ export default function RecordBtn({ onTranscription, setIsProcessing }: Props) {
         setIsProcessingLocal(true);
         if (setIsProcessing) setIsProcessing(true);
         const audioBlob = new Blob(chunks, { type: "audio/webm" });
+
+        // Provide the raw recorded file to parent if requested
+        try {
+          const audioFile = new File([audioBlob], "recording.webm", {
+            type: "audio/webm",
+          });
+          onAudio?.(audioFile);
+        } catch {
+          // fallback: if File constructor not available
+          onAudio?.(null);
+        }
 
         const form = new FormData();
         form.append("file", audioBlob, "audio.webm");
