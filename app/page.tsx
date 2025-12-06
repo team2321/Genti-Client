@@ -1,263 +1,201 @@
 "use client";
 
-import { useRef, useState, useEffect } from "react";
-import { Square, Settings } from "lucide-react";
-import { FaMicrophone } from "react-icons/fa";
+import { useState, useEffect } from "react";
+import { toast, ToastContainer } from "react-toastify";
+import "react-toastify/dist/ReactToastify.css";
+import Image from "next/image";
+import RecordBtn from "@/components/Button/RecordBtn";
+import ReportBtn from "@/components/Button/ReportBtn";
+import { RiErrorWarningFill } from "react-icons/ri";
+import { SyncLoader } from "react-spinners";
 
-interface Message {
-  id: string;
-  text: string;
-  isUser: boolean; // true = 상담원(오른쪽), false = 고객(왼쪽)
-  timestamp: Date;
+interface ResponseGuide {
+  situation: string;
+  current_action: string;
+  current_script: string;
+  next_steps: string[];
 }
 
 export default function GentiChatInterface() {
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const [recording, setRecording] = useState(false);
-  const [messages, setMessages] = useState<Message[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [recordedFile, setRecordedFile] = useState<File | null>(null);
+  const [responseGuide, setResponseGuide] = useState<ResponseGuide | null>(
+    null
+  );
 
-  // Auto scroll to bottom when new messages arrive
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  const handleTranscription = (text: string, guide?: ResponseGuide | null) => {
+    // If backend returned a guide, set it and show the warning toasts
+    if (guide) {
+      setResponseGuide(guide);
 
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const agent_msg =
+        "공격적인 발언 감지\n고객님께 발언에 대한 신중성을 안내했습니다.";
+      const customer_msg =
+        "공격적인 표현이 감지되었습니다.\n차분하게 대화를 이어나가주세요.";
 
-      const recorder = new MediaRecorder(stream, {
-        mimeType: "audio/webm;codecs=opus",
+      // Show warnings when guide is generated
+      toast.warning(agent_msg, {
+        containerId: "agent-toast",
+        position: "top-center",
+        autoClose: 3000,
+        hideProgressBar: true,
+        closeOnClick: true,
+        pauseOnHover: true,
+        draggable: true,
       });
-      mediaRecorderRef.current = recorder;
 
-      const chunks: BlobPart[] = [];
-
-      recorder.ondataavailable = (e) => {
-        chunks.push(e.data);
-      };
-
-      recorder.onstop = async () => {
-        setIsProcessing(true);
-        const audioBlob = new Blob(chunks, { type: "audio/webm" });
-
-        const form = new FormData();
-        form.append("file", audioBlob, "audio.webm");
-
-        try {
-          // Send to backend for Azure STT
-          const res = await fetch("/api/stt", {
-            method: "POST",
-            body: form,
-          });
-
-          const data = await res.json();
-
-          if (data.text) {
-            // Add customer message (고객 메시지 - 왼쪽)
-            const customerMessage: Message = {
-              id: Date.now().toString(),
-              text: data.text,
-              isUser: false, // false = 고객 (왼쪽에 표시)
-              timestamp: new Date(),
-            };
-            setMessages((prev) => [...prev, customerMessage]);
-
-            // TODO: 실제 상담원 AI 응답으로 교체
-            // Simulate agent response (상담원 응답 - 오른쪽)
-            setTimeout(() => {
-              const agentMessage: Message = {
-                id: (Date.now() + 1).toString(),
-                text: "이곳에 대응 스크립트 표시",
-                isUser: true, // true = 상담원 (오른쪽에 표시)
-                timestamp: new Date(),
-              };
-              setMessages((prev) => [...prev, agentMessage]);
-            }, 1000);
-          }
-        } catch (error) {
-          console.error("Error processing audio:", error);
-        } finally {
-          setIsProcessing(false);
-        }
-
-        // Stop all tracks
-        stream.getTracks().forEach((track) => track.stop());
-      };
-
-      recorder.start();
-      setRecording(true);
-    } catch (error) {
-      console.error("Error accessing microphone:", error);
-      alert("마이크 접근 권한이 필요합니다.");
-    }
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && recording) {
-      mediaRecorderRef.current.stop();
-      mediaRecorderRef.current = null;
-      setRecording(false);
+      toast.warning(customer_msg, {
+        containerId: "customer-toast",
+        position: "top-center",
+        autoClose: 3000,
+        hideProgressBar: true,
+        closeOnClick: true,
+        pauseOnHover: true,
+        draggable: true,
+      });
     }
   };
 
   return (
-    <div className="flex h-screen bg-gray-900">
-      {/* Left Panel - Recording Interface (고객 음성 입력) */}
-      <div className="flex-1 bg-[#C4F15A] flex flex-col items-center justify-center relative">
-        {/* Logo */}
-        <div className="absolute top-8 left-8">
-          <h1 className="text-4xl font-bold text-gray-900">Logo</h1>
+    <div className="flex h-screen bg-[#373737] grid grid-cols-[2fr_1fr]">
+      {/* Floating Mic Button - Bottom Left */}
+      <RecordBtn
+        onTranscription={handleTranscription}
+        setIsProcessing={setIsProcessing}
+        onAudio={(f) => setRecordedFile(f)}
+      />
+
+      {/* Agent View */}
+      <div className="flex flex-col h-full">
+        {/* Toast container for Agent view */}
+        <ToastContainer
+          containerId="agent-toast"
+          position="top-center"
+          autoClose={3000}
+          hideProgressBar
+          closeOnClick={false}
+          draggable
+          toastClassName={() =>
+            "min-w-[360px] rounded-xl bg-white text-[#333] shadow-lg border border-[#E5E5E5] px-4 py-3 flex items-start space-x-3"
+          }
+          icon={<RiErrorWarningFill className="text-[#C4F15A] text-4xl" />}
+          className="absolute left-[33%] transform -translate-x-1/2 whitespace-pre-line text-sm font-bold"
+        />
+
+        {/* Header */}
+        <div className="bg-[#373737] px-6 py-4 border-b border-[#939393] fixed w-full">
+          <Image src="/genti-logo.svg" alt="logo" width={80} height={40} />
         </div>
 
-        {/* Microphone Button */}
-        <div className="relative">
-          {/* Pulse animation when recording */}
-          {recording && (
-            <>
-              <div className="absolute inset-0 rounded-full bg-white/30 animate-ping" />
-              <div className="absolute inset-0 rounded-full bg-white/20 animate-ping animation-delay-200" />
-            </>
-          )}
-
-          <button
-            onClick={recording ? stopRecording : startRecording}
-            disabled={isProcessing}
-            className={`
-              relative z-10 w-32 h-32 rounded-full flex items-center justify-center
-              transition-all duration-300 transform hover:scale-105
-              ${
-                recording
-                  ? "bg-[#B0D854] hover:bg-white"
-                  : "bg-[#D5FF74] hover:bg-white"
-              }
-              ${
-                isProcessing
-                  ? "opacity-50 cursor-not-allowed"
-                  : "cursor-pointer"
-              }
-            `}
-          >
-            {recording ? (
-              <Square className="w-12 h-12 text-[#D5FF74]" fill="#D5FF74" />
-            ) : (
-              <FaMicrophone className="w-12 h-12 text-[#B0D854]" />
-            )}
-          </button>
-        </div>
-
-        {/* Status Text */}
-        <div className="mt-8 text-center">
-          <p className="text-lg font-medium text-gray-800">
-            {isProcessing
-              ? "처리 중..."
-              : recording
-              ? "고객님의 말씀을 듣고 있어요..."
-              : "마이크를 눌러 고객 음성을 입력하세요"}
-          </p>
-        </div>
-
-        {/* Visual feedback */}
-        {recording && (
-          <div className="mt-6 flex space-x-1">
-            {[...Array(5)].map((_, i) => (
-              <div
-                key={i}
-                className="w-1 bg-gray-800 rounded-full animate-pulse"
-                style={{
-                  height: `${20 + Math.random() * 30}px`,
-                  animationDelay: `${i * 0.1}s`,
-                  animationDuration: "0.8s",
-                }}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Right Panel - Chat Interface (고객-상담원 대화) */}
-      <div className="flex-1 bg-gray-800 flex flex-col">
-        {/* Chat Header */}
-        <div className="bg-gray-900 px-6 py-4 flex items-center justify-between border-b border-gray-700">
-          <div>
-            <h2 className="text-white text-lg font-medium">고객 상담 채팅</h2>
-            <p className="text-gray-400 text-xs mt-1">
-              고객 음성 → 상담원 응답
-            </p>
-          </div>
-          <button className="p-2 hover:bg-gray-700 rounded-lg transition-colors">
-            <Settings className="w-5 h-5 text-gray-400" />
-          </button>
-        </div>
-
-        {/* Messages Container */}
-        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-          {messages.length === 0 ? (
-            <div className="flex items-center justify-center h-full">
-              <p className="text-gray-500 text-center">
-                마이크 버튼을 눌러
-                <br />
-                고객 음성을 입력하세요
-              </p>
-            </div>
-          ) : (
-            messages.map((message) => (
-              <div
-                key={message.id}
-                className={`flex ${
-                  message.isUser ? "justify-end" : "justify-start"
-                }`}
-              >
-                <div className="flex flex-col">
-                  {/* Role Label */}
-                  <span
-                    className={`text-xs text-gray-400 mb-1 ${
-                      message.isUser ? "text-right mr-2" : "ml-2"
-                    }`}
-                  >
-                    {message.isUser ? "상담원" : "고객"}
-                  </span>
-
-                  {/* Message Bubble */}
-                  <div
-                    className={`
-                       px-4 py-3 rounded-2xl
-                      ${
-                        message.isUser
-                          ? "bg-blue-600 text-white rounded-br-md" // 상담원 (오른쪽, 파란색)
-                          : "bg-gray-700 text-gray-100 rounded-bl-md" // 고객 (왼쪽, 회색)
-                      }
-                    `}
-                  >
-                    <p className="text-sm">{message.text}</p>
-                    <p className="text-xs mt-1 opacity-70">
-                      {message.timestamp.toLocaleTimeString("ko-KR", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </p>
-                  </div>
+        <div className="flex-1 overflow-y-auto px-6 py-10 min-h-full flex flex-col items-center justify-center relative">
+          {/* Loading overlay */}
+          {isProcessing && (
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/50">
+              <div className="flex flex-col items-center gap-4">
+                <SyncLoader color="#C4F15A" />
+                <div className="text-white font-semibold">
+                  음성 인식 및 응답 생성 중...
                 </div>
               </div>
-            ))
-          )}
-          <div ref={messagesEndRef} />
-        </div>
-
-        {/* Processing Indicator */}
-        {isProcessing && (
-          <div className="px-6 py-3 border-t border-gray-700">
-            <div className="flex items-center space-x-2">
-              <div className="flex space-x-1">
-                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
-                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce animation-delay-100" />
-                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce animation-delay-200" />
-              </div>
-              <span className="text-gray-400 text-sm">음성 인식 중...</span>
             </div>
-          </div>
-        )}
+          )}
+
+          {/* Only show content if responseGuide exists */}
+          {responseGuide ? (
+            <div className="max-w-3xl w-full">
+              {/* Title */}
+              <div>
+                <p className="text-[#C4F15A] text-base font-bold mb-6">
+                  상황 요약
+                </p>
+                <p className="text-white text-lg leading-relaxed font-semibold">
+                  {responseGuide.situation}
+                </p>
+              </div>
+
+              {/* Step by step guidance */}
+              <div className="flex mt-15 justify-between">
+                <div>
+                  <p className="text-[#C4F15A] text-base font-bold">
+                    단계별 대응 요령 안내
+                  </p>
+                  <span className="text-[#B3B3B3] text-sm font-bold flex items-center space-x-1">
+                    <RiErrorWarningFill className="text-[#B3B3B3]" />
+                    <span>신고 가능한 발언입니다.</span>
+                  </span>
+                </div>
+                <ReportBtn
+                  audioFile={recordedFile}
+                  onClearAudio={() => setRecordedFile(null)}
+                />
+              </div>
+
+              <div className="relative pt-6">
+                <div className="absolute left-[11px] top-14 bottom-2 w-0.5 bg-[#C4F15A]"></div>
+                <div className="space-y-8">
+                  {/* Current step (NOW) */}
+                  <div className="relative flex items-start">
+                    <div className="ml-5 flex pt-0.5 items-center">
+                      <div className="-ml-5 flex-shrink-0 w-6 h-6 rounded-full bg-[#C4F15A] z-10"></div>
+                      <div className="pl-4">
+                        <div className="bg-[#C4F15A] text-gray-900 text-xs font-bold px-1 py-0.5 rounded w-fit">
+                          NOW
+                        </div>
+                        <p className="text-lg text-white font-bold">
+                          {responseGuide.current_action}
+                        </p>
+                      </div>
+                      <div className="ml-5 mt-2 p-4 bg-[#C4F15A] text-gray-900 rounded-lg relative before:content-[''] before:absolute before:right-full before:top-7 before:border-8 before:border-transparent before:border-r-[#C4F15A] max-w-sm text-sm font-semibold">
+                        {responseGuide.current_script}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Next steps */}
+                  {responseGuide.next_steps.map((step, index) => (
+                    <div key={index} className="relative flex items-start">
+                      <div className="flex-shrink-0 w-6 h-6 rounded-full bg-[#C4F15A] z-10 mt-1"></div>
+                      <div className="ml-5 flex-1 pt-0.5">
+                        <p className="text-lg font-semibold text-gray-200">
+                          {step}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* Empty state - show nothing except placeholder message */
+            <div className="flex flex-col items-center justify-center text-gray-500">
+              <p className="text-lg">상담을 듣는 중..</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Customer view */}
+      <div className="flex-1 bg-gray-700 flex flex-col items-center justify-center relative overflow-hidden">
+        {/* Toast container for Customer view */}
+        <ToastContainer
+          containerId="customer-toast"
+          position="top-center"
+          autoClose={3000}
+          hideProgressBar
+          pauseOnHover
+          draggable
+          toastClassName={() =>
+            "min-w-[360px] rounded-2xl bg-[#4A4A4A] text-white px-5 py-4 shadow-md flex items-start space-x-3"
+          }
+          icon={<RiErrorWarningFill className="text-[#FFCC4D] text-4xl" />}
+          className="customer-toast-container whitespace-pre-line text-sm font-bold"
+          progressClassName="!bg-white"
+          style={{
+            left: "83.33%",
+            transform: "translateX(-50%)",
+          }}
+        />
+        <Image src="/call.png" width={80} height={160} alt="Call interface" />
       </div>
     </div>
   );
