@@ -5,10 +5,52 @@ import ffmpeg from "fluent-ffmpeg";
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
+import { existsSync } from "fs";
 
 export const runtime = "nodejs";
 
+
+
+/*
 // ==========================================================================
+// macOS FFmpeg 경로 설정
+const possiblePaths = [
+  "/opt/homebrew/bin/ffmpeg",
+  "/usr/local/bin/ffmpeg",
+  "/opt/local/bin/ffmpeg",
+  "/usr/bin/ffmpeg",
+];
+
+let ffmpegPath: string | undefined;
+
+for (const testPath of possiblePaths) {
+  if (existsSync(testPath)) {
+    ffmpegPath = testPath;
+    console.log("✅ Found system FFmpeg at:", ffmpegPath);
+    break;
+  }
+}
+
+if (!ffmpegPath) {
+  console.warn(
+    "⚠️ FFmpeg not found in common locations, trying system PATH..."
+  );
+  ffmpegPath = "ffmpeg";
+}
+
+try {
+  ffmpeg.setFfmpegPath(ffmpegPath);
+  console.log("🎬 Using FFmpeg from:", ffmpegPath);
+} catch (error) {
+  console.error("❌ Failed to set FFmpeg path:", error);
+  console.error("💡 Please install FFmpeg: brew install ffmpeg");
+}
+*/
+
+
+
+// ==========================================================================
+// Window FFmpeg
 // FFmpeg 경로 강제 지정
 // ffmpeg-static이 주는 경로가 꼬였을 때, 직접 node_modules 안을 가리키게 합니다.
 let ffmpegPath = ffmpegInstaller;
@@ -25,6 +67,7 @@ if (ffmpegPath) {
   console.log("✅ FFmpeg Path Set:", ffmpegPath); // 서버 로그에서 경로 확인용
 }
 
+// ==========================================================================
 // Content Safety 타입 정의
 type Category = "Hate" | "SelfHarm" | "Sexual" | "Violence";
 
@@ -39,27 +82,126 @@ interface SafetyResponse {
   error?: { code: string; message: string };
 }
 
-// OpenAI 가이드 응답 타입
 interface ResponseGuide {
   situation: string;
   current_action: string;
   current_script: string;
   next_steps: string[];
+  reportable?: boolean;
+  report_reason?: string;
+  matched_law?: string;
 }
+
+interface SearchDocument {
+  category: string;
+  subcategory: string;
+  regulation: string;
+  article: string;
+  content: string;
+  penalty: string;
+}
+
+
+
 // ==========================================================================
+// Azure AI Search로 법규 검색 함수
+async function searchRegulations(userText: string): Promise<{
+  reportable: boolean;
+  report_reason: string | null;
+  matched_law: string | null;
+}> {
+  const searchEndpoint = process.env.AZURE_SEARCH_ENDPOINT!;
+  const searchKey = process.env.AZURE_SEARCH_KEY!;
+  const indexName = process.env.AZURE_SEARCH_INDEX_NAME || "report-index";
 
+  try {
+    // Azure AI Search에 의미 검색 요청
+    const searchUrl = `${searchEndpoint}/indexes/${indexName}/docs/search?api-version=2023-11-01`;
 
+    const searchResponse = await fetch(searchUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "api-key": searchKey,
+      },
+      body: JSON.stringify({
+        search: userText,
+        searchMode: "all",
+        queryType: "semantic",
+        semanticConfiguration: "default",
+        top: 5,
+        select: "category,subcategory,regulation,article,content,penalty",
+        queryLanguage: "ko-KR",
+      }),
+    });
 
-// Azure OpenAI 대응 가이드 생성 함수
-async function generateResponseGuide(sttText: string, safetyResult: SafetyResponse): Promise<ResponseGuide | null> {
-    const apiKey = process.env.AZURE_OPENAI_KEY!;
-    const endpoint = process.env.AZURE_OPENAI_ENDPOINT!;
-    const deploymentName = "smu-team6-gpt-4o-mini";
-    const apiVersion = "2024-02-15-preview";
+    if (!searchResponse.ok) {
+      console.error("Search API Error:", searchResponse.statusText);
+      return { reportable: false, report_reason: null, matched_law: null };
+    }
 
-    const url = `${endpoint}openai/deployments/${deploymentName}/chat/completions?api-version=${apiVersion}`;
+    const searchData = await searchResponse.json();
 
-    const systemPrompt = `당신은 콜센터 상담원을 지원하는 전문 어시스턴트입니다.
+    // 검색 결과 분석
+    if (searchData.value && searchData.value.length > 0) {
+      // 가장 관련도 높은 법규 확인
+      const topMatch = searchData.value[0];
+
+      // 신고 가능 여부 판단 (특정 키워드나 카테고리 확인)
+      const reportableCategories = ["형법", "성폭력처벌법", "정보통신망법"];
+      const reportableKeywords = ["협박", "모욕", "명예훼손", "성희롱", "폭행"];
+
+      const isReportable =
+        reportableCategories.some(
+          (cat) =>
+            topMatch.category?.includes(cat) ||
+            topMatch.regulation?.includes(cat)
+        ) ||
+        reportableKeywords.some((keyword) =>
+          topMatch.content?.includes(keyword)
+        );
+
+      if (isReportable) {
+        const lawName = topMatch.article
+          ? `${topMatch.regulation} ${topMatch.article}`
+          : topMatch.regulation;
+
+        return {
+          reportable: true,
+          report_reason: `고객 발화가 '${lawName}' 규정과 의미적으로 유사한 ${
+            topMatch.subcategory || "위협적"
+          } 표현입니다.`,
+          matched_law: lawName,
+        };
+      }
+    }
+
+    return { reportable: false, report_reason: null, matched_law: null };
+  } catch (error) {
+    console.error("Error searching regulations:", error);
+    return { reportable: false, report_reason: null, matched_law: null };
+  }
+}
+
+// ==========================================================================
+// Azure OpenAI 대응 가이드 생성 함수 (법규 정보 포함)
+async function generateResponseGuide(
+  sttText: string,
+  safetyResult: SafetyResponse,
+  regulationInfo: {
+    reportable: boolean;
+    report_reason: string | null;
+    matched_law: string | null;
+  }
+): Promise<ResponseGuide | null> {
+  const apiKey = process.env.AZURE_OPENAI_KEY!;
+  const endpoint = process.env.AZURE_OPENAI_ENDPOINT!;
+  const deploymentName = "smu-team6-gpt-4o-mini";
+  const apiVersion = "2024-02-15-preview";
+
+  const url = `${endpoint}openai/deployments/${deploymentName}/chat/completions?api-version=${apiVersion}`;
+
+  const systemPrompt = `당신은 콜센터 상담원을 지원하는 전문 어시스턴트입니다.
 
 목적:
 - 고객의 공격적·모욕적 발화를 들은 상담원이 감정적으로 휘둘리지 않고, 회사 매뉴얼에 맞게 침착하게 대응하도록 '상황 요약'과 '단계별 응대 가이드'를 생성하는 것이 당신의 역할입니다.
@@ -71,7 +213,7 @@ async function generateResponseGuide(sttText: string, safetyResult: SafetyRespon
 
 상황 요약(situation) 작성 규칙:
 - 감정을 섞지 않고, 객관적인 서술형으로 작성합니다.
-- 욕설·모욕·비하는 "심한 욕설", "모욕적인 표현", "공격적인 표현" 등으로 치환합니다.
+- 욕설·모욕·비하는 "심한 욕설", "모욕적인 표현", "공격적인 표현", "위협적 표현" 등으로 치환합니다.
 
 톤 & 스타일 지침:
 - 고객을 비난하거나 가르치는 느낌을 주지 않습니다.
@@ -79,41 +221,56 @@ async function generateResponseGuide(sttText: string, safetyResult: SafetyRespon
 - 감정적인 표현은 사용하지 않습니다.
 - 항상 차분하고 공손한 존댓말을 사용합니다.
 
+${
+  regulationInfo.reportable
+    ? `
+신고 가능 상황:
+- 현재 고객의 발화는 법적으로 신고 가능한 수준입니다.
+- next_steps에 "반복적 위협 발생 시 보고" 또는 유사한 내용을 포함하세요.
+`
+    : ""
+}
+
 출력 형식:
 - 반드시 아래 JSON 형식만 출력합니다. JSON 외 텍스트 절대 금지.
 {
   "situation": "객관적인 상황 요약 (1-2문장)",
-  "current_action": "1단계: 지금 즉시 해야 할 행동",
-  "current_script": "1단계에 맞는 응대 문구 (1-2문장)",
-  "next_steps": ["2단계...", "3단계...", "4단계..."]
+  "current_action": "지금 즉시 해야 할 행동",
+  "current_script": "응대 문구 (1-2문장)",
+  "next_steps": ["다음 단계 1", "다음 단계 2", "다음 단계 3"],
+  "reportable": true or false,
+  "report_reason": "신고 가능한 이유",
+  "matched_law": "해당 발언이 신고 가능한 법적 근거"
 }`;
 
-    const fetchOpenAI = async (inputText: string) => {
+  const fetchOpenAI = async (inputText: string) => {
     return await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", "api-key": apiKey },
       body: JSON.stringify({
         messages: [
           { role: "system", content: systemPrompt },
-          { role: "user", content: `고객 발화: ${inputText}` }
+          { role: "user", content: `고객 발화: ${inputText}` },
         ],
         temperature: 0.7,
-        max_tokens: 600
+        max_tokens: 600,
       }),
     });
   };
 
   try {
-    console.log("🤖 Generating guide (Attempt 1: Raw Text)...");
+    console.log("🤖 Generating guide...");
     let response = await fetchOpenAI(sttText);
 
     if (response.status === 400) {
-      console.warn("⚠️ OpenAI blocked raw text (Content Filter). Retrying with sanitized description...");
+      console.warn(
+        "⚠️ OpenAI blocked raw text. Retrying with sanitized description..."
+      );
       const detectedCategories = safetyResult.categoriesAnalysis
-        .filter(c => c.severity > 0)
-        .map(c => `${c.category} (Severity: ${c.severity})`)
+        .filter((c) => c.severity > 0)
+        .map((c) => `${c.category} (Severity: ${c.severity})`)
         .join(", ");
-        
+
       const sanitizedText = `(The user input was blocked by safety filters. Detected: ${detectedCategories}. Please provide a general guide for this type of aggression.)`;
       response = await fetchOpenAI(sanitizedText);
     }
@@ -126,71 +283,44 @@ async function generateResponseGuide(sttText: string, safetyResult: SafetyRespon
 
     const data = await response.json();
     const content = data.choices[0].message.content;
-    return JSON.parse(content);
 
-  } catch (error) {
-    console.error("Error generating guide:", error);
-    return null;
-  }
+    // JSON 파싱 및 정리
+    const guideResult = JSON.parse(content);
 
-  /*
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "api-key": apiKey,
-      },
-      body: JSON.stringify({
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: "고객 발화: XX 같은 놈들, 배송 왜 이렇게 늦어!" },
-          {
-            role: "assistant",
-            content: JSON.stringify({
-              situation: "고객이 심한 욕설을 사용하며 배송 지연에 대해 강하게 불만을 표현하고 있습니다.",
-              current_action: "1단계: 고객 감정 인정 및 사과",
-              current_script: "배송 지연으로 많이 불편하셨을 것 같습니다. 먼저 불편을 겪게 해드린 점 진심으로 사과드립니다.",
-              next_steps: ["2단계: 배송 조회 시스템 즉시 확인", "3단계: 구체적 배송 예정일 안내", "4단계: 필요시 보상 방안 제시"]
-            })
-          },
-          { role: "user", content: "고객 발화: 환불 안 해주면 가만 안 둬, 진짜 죽이고 싶네" },
-          {
-            role: "assistant",
-            content: JSON.stringify({
-              situation: "고객이 공격적인 표현과 협박성 발언을 사용하며 환불을 강하게 요청하고 있습니다.",
-              current_action: "1단계: 환불 요청 확인 및 안심시키기",
-              current_script: "환불 요청 확인했습니다. 지금 바로 환불 절차 확인해서 도와드릴 수 있는 방법을 안내드리겠습니다.",
-              next_steps: ["2단계: 환불 가능 여부 즉시 확인", "3단계: 환불 예상 기간 명확히 안내", "4단계: 욕설 지속 시 정중히 자제 요청"]
-            })
-          },
-          { role: "user", content: `고객 발화: ${sttText}` }
-        ],
-        temperature: 0.7,
-        max_tokens: 600
-      }),
-    });
-
-    if (!response.ok) {
-      console.error("OpenAI API Error:", response.statusText);
-      return null;
+    // "1단계:", "2단계:" 같은 접두사 제거
+    if (guideResult.current_action) {
+      guideResult.current_action = guideResult.current_action
+        .replace(/^\d+단계:\s*/, "")
+        .replace(/^1\.\s*/, "")
+        .trim();
     }
 
-    const data = await response.json();
-    const content = data.choices[0].message.content;
-    
-    // JSON 문자열을 객체로 파싱
-    return JSON.parse(content);
+    if (guideResult.next_steps) {
+      guideResult.next_steps = guideResult.next_steps.map((step: string) =>
+        step
+          .replace(/^\d+단계:\s*/, "")
+          .replace(/^\d+\.\s*/, "")
+          .trim()
+      );
+    }
 
+    // 법규 정보 추가
+    if (regulationInfo.reportable) {
+      guideResult.reportable = true;
+      guideResult.report_reason = regulationInfo.report_reason;
+      guideResult.matched_law = regulationInfo.matched_law;
+    } else {
+      guideResult.reportable = false;
+    }
+
+    return guideResult;
   } catch (error) {
     console.error("Error generating guide:", error);
     return null;
   }
-    */
-
 }
 
-
-
+// ==========================================================================
 // API Handler
 export async function POST(req: Request) {
   let tempInputPath: string | null = null;
@@ -215,38 +345,64 @@ export async function POST(req: Request) {
     const buffer = Buffer.from(arrayBuffer);
     await fs.writeFile(tempInputPath, buffer);
 
-    // FFmpeg로 변환 (Promise로 래핑)
-    await new Promise((resolve, reject) => {
-      ffmpeg(tempInputPath!)
-        .outputOptions(["-acodec pcm_s16le", "-ac 1", "-ar 16000"])
-        .output(tempOutputPath!)
-        .on("end", resolve)
-        .on("error", reject)
-        .run();
-    });
+    console.log("📁 Temp input file created:", tempInputPath);
+
+    // FFmpeg로 변환
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const command = ffmpeg(tempInputPath!)
+          .outputOptions(["-acodec", "pcm_s16le", "-ac", "1", "-ar", "16000"])
+          .output(tempOutputPath!)
+          .on("start", (commandLine) => {
+            console.log("🎬 FFmpeg command:", commandLine);
+          })
+          .on("end", () => {
+            console.log("✅ FFmpeg conversion successful");
+            resolve();
+          })
+          .on("error", (err) => {
+            console.error("❌ FFmpeg conversion error:", err);
+            reject(err);
+          });
+
+        command.run();
+      });
+    } catch (ffmpegError) {
+      console.error("FFmpeg failed:", ffmpegError);
+
+      if ((ffmpegError as any).message?.includes("ENOENT")) {
+        return NextResponse.json(
+          {
+            error: "FFmpeg not found. Please install FFmpeg first.",
+            install: "Run: brew install ffmpeg",
+            details:
+              ffmpegError instanceof Error
+                ? ffmpegError.message
+                : "Unknown error",
+          },
+          { status: 500 }
+        );
+      }
+
+      throw ffmpegError;
+    }
 
     // 변환된 WAV 파일 읽기
     const wavBuffer = await fs.readFile(tempOutputPath);
+    console.log("📊 WAV file size:", wavBuffer.length, "bytes");
 
-    // Azure Speech 설정 (PushStream)
+    // Azure Speech 설정
     const speechConfig = sdk.SpeechConfig.fromSubscription(
       process.env.AZURE_SPEECH_KEY!,
       process.env.AZURE_SPEECH_REGION!
     );
-    speechConfig.speechRecognitionLanguage = "ko-KR"; // 한국어 설정
+    speechConfig.speechRecognitionLanguage = "ko-KR";
 
-    /*
-    // WAV 버퍼를 Azure Speech SDK에 전달
-    const audioConfig = sdk.AudioConfig.fromWavFileInput(wavBuffer);
-    const recognizer = new sdk.SpeechRecognizer(speechConfig, audioConfig);
-    */
-    // 1. PushStream 생성 (데이터를 밀어넣는 방식)
+    // PushStream을 사용하여 오디오 데이터 전달
     const pushStream = sdk.AudioInputStream.createPushStream();
-    // 2. 오디오 데이터를 스트림에 밀어넣음
     pushStream.write(wavBuffer.buffer);
-    // 3. 스트림 닫기 (SDK에게 데이터가 끝났음을 명시적으로 알림)
     pushStream.close();
-    // 4. Config에 스트림 연결
+
     const audioConfig = sdk.AudioConfig.fromStreamInput(pushStream);
     const recognizer = new sdk.SpeechRecognizer(speechConfig, audioConfig);
 
@@ -266,18 +422,15 @@ export async function POST(req: Request) {
       }
     );
 
-    // 결과 확인 및 반환
+    // 결과 확인 및 처리
     if (result.reason === sdk.ResultReason.RecognizedSpeech) {
-      console.log("Recognition successful:", result.text);
+      console.log("🎤 Recognition successful:", result.text);
 
-
-      // ============================================================
       // Content Safety API 호출
-      
       const safetyEndpoint = process.env.AZURE_CONTENT_SAFETY_ENDPOINT!;
       const safetyKey = process.env.AZURE_CONTENT_SAFETY_KEY!;
       const apiVersion = "2024-09-01";
-      
+
       const safetyUrl = `${safetyEndpoint}/contentsafety/text:analyze?api-version=${apiVersion}`;
 
       const safetyResponse = await fetch(safetyUrl, {
@@ -287,30 +440,30 @@ export async function POST(req: Request) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          // STT 결과
           text: result.text,
           blocklistNames: [],
         }),
       });
 
       if (!safetyResponse.ok) {
-        throw new Error(`Content Safety API Error: ${safetyResponse.statusText}`);
+        throw new Error(
+          `Content Safety API Error: ${safetyResponse.statusText}`
+        );
       }
 
       const safetyResult: SafetyResponse = await safetyResponse.json();
 
       // 유해성 판별
       const rejectThresholds: Record<Category, number> = {
-        Hate: 2,
-        SelfHarm: 2,
-        Sexual: 2,
-        Violence: 2,
+        Hate: 0,
+        SelfHarm: 0,
+        Sexual: 0,
+        Violence: 0,
       };
 
       let finalAction = "Accept";
       const actionDetails: Record<string, string> = {};
 
-      // 카테고리별 점수 확인
       if (safetyResult.categoriesAnalysis) {
         for (const analysis of safetyResult.categoriesAnalysis) {
           const category = analysis.category;
@@ -318,7 +471,6 @@ export async function POST(req: Request) {
           const threshold = rejectThresholds[category];
 
           let action = "Accept";
-          // 기준치 이상이면 Reject
           if (threshold !== -1 && severity >= threshold) {
             action = "Reject";
             finalAction = "Reject";
@@ -327,46 +479,45 @@ export async function POST(req: Request) {
         }
       }
 
-      // finalAction == "Reject"인 경우 OpenAI 가이드 생성
+      // Reject인 경우 처리
       let guideResult: ResponseGuide | null = null;
-      
-      if (finalAction === "Reject") {
-        console.log("🚨 Unsafe content detected. Generating response guide...");
-        // generateResponseGuide 함수 호출
-        guideResult = await generateResponseGuide(result.text, safetyResult);
 
-        if (guideResult) {
-          if (guideResult.current_action) guideResult.current_action = guideResult.current_action.replace(/^\d+단계:\s*/, '').trim();
-          if (guideResult.next_steps) guideResult.next_steps = guideResult.next_steps.map(step => step.replace(/^\d+단계:\s*/, '').trim());
-        }
+      if (finalAction === "Reject") {
+        console.log("🚨 Unsafe content detected. Searching regulations...");
+
+        // 1. Azure AI Search로 법규 검색
+        const regulationInfo = await searchRegulations(result.text);
+        console.log("📚 Regulation search result:", regulationInfo);
+
+        // 2. OpenAI 가이드 생성 (법규 정보 포함)
+        guideResult = await generateResponseGuide(
+          result.text,
+          safetyResult,
+          regulationInfo
+        );
       }
 
-      // 최종 응답 반환
+      // 최종 응답
       const responsePayload = {
         text: result.text,
-        // Accept / Reject
         safetyDecision: finalAction,
-        // 카테고리별 결과
         safetyDetails: actionDetails,
-        // 원본 data
         rawSafetyResult: safetyResult,
-        // 가이드 결과 추가 (Accept면 null)
-        guide: guideResult
+        guide: guideResult,
       };
 
-      // JSON 출력
-      console.log("📦 Final JSON Response:\n", JSON.stringify(responsePayload, null, 2));
+      console.log(
+        "📦 Final JSON Response:\n",
+        JSON.stringify(responsePayload, null, 2)
+      );
 
-      // 클라이언트에게 반환
       return NextResponse.json(responsePayload);
-      // ============================================================
-      
     } else if (result.reason === sdk.ResultReason.NoMatch) {
-      console.log("No speech could be recognized");
+      console.log("❌ No speech recognized");
       return NextResponse.json({ text: "", error: "No speech recognized" });
     } else if (result.reason === sdk.ResultReason.Canceled) {
       const cancellation = sdk.CancellationDetails.fromResult(result);
-      console.error("Recognition canceled:", cancellation.reason);
+      console.error("❌ Recognition canceled:", cancellation.reason);
       return NextResponse.json(
         {
           text: "",
@@ -378,7 +529,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ text: "" });
   } catch (error) {
-    console.error("Error in speech recognition:", error);
+    console.error("❌ Error in speech recognition:", error);
     return NextResponse.json(
       {
         error: "Failed to process audio",
@@ -387,12 +538,23 @@ export async function POST(req: Request) {
       { status: 500 }
     );
   } finally {
-    // 임시 파일 삭제
-    if (tempInputPath) {
-      await fs.unlink(tempInputPath).catch(console.error);
+    // 임시 파일 정리
+    try {
+      if (tempInputPath && existsSync(tempInputPath)) {
+        await fs.unlink(tempInputPath);
+        console.log("🗑️ Cleaned up input file");
+      }
+    } catch (e) {
+      console.warn("Could not delete input file:", e);
     }
-    if (tempOutputPath) {
-      await fs.unlink(tempOutputPath).catch(console.error);
+
+    try {
+      if (tempOutputPath && existsSync(tempOutputPath)) {
+        await fs.unlink(tempOutputPath);
+        console.log("🗑️ Cleaned up output file");
+      }
+    } catch (e) {
+      console.warn("Could not delete output file:", e);
     }
   }
 }
