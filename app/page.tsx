@@ -195,7 +195,7 @@ export default function GentiChatInterface() {
             transform: "translateX(-50%)",
           }}
         />
-        <Image src="/call.png" width={80} height={160} alt="Call interface" />
+        <Image src="/call.png" width={480} height={160} alt="Call interface" />
       </div>
     </div>
   );
