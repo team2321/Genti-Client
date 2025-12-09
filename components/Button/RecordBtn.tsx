@@ -3,7 +3,7 @@ import { useRef, useState } from "react";
 
 interface Props {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  onTranscription?: (text: string, guide?: any) => void;
+  onTranscription?: (text: string, guide?: any, regulation?: any) => void;
   setIsProcessing?: (v: boolean) => void;
   onAudio?: (file: File | null) => void;
 }
@@ -60,8 +60,12 @@ export default function RecordBtn({
           const data = await res.json();
 
           if (data) {
-            // data may contain { text, guide, ... }
-            onTranscription?.(data.text ?? "", data.guide ?? null);
+            // data may contain { text, guide, regulation, ... }
+            onTranscription?.(
+              data.text ?? "",
+              data.guide ?? null,
+              data.regulation ?? null
+            );
           }
         } catch (error) {
           console.error("Error processing audio:", error);
