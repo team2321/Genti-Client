@@ -1,6 +1,7 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { toast, ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import Image from "next/image";
@@ -16,22 +17,88 @@ interface ResponseGuide {
   next_steps: string[];
 }
 
+interface Regulation {
+  category: string;
+  subcategory: string;
+  regulation: string;
+  article: string;
+  content: string;
+  penalty: string;
+  score: number;
+}
+
 export default function GentiChatInterface() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [recordedFile, setRecordedFile] = useState<File | null>(null);
   const [responseGuide, setResponseGuide] = useState<ResponseGuide | null>(
     null
   );
+  const [regulation, setRegulation] = useState<Regulation | null>(null);
+  const [transcribedText, setTranscribedText] = useState<string | null>(null);
+  const [abuseCount, setAbuseCount] = useState(0);
+  const [sexualHarassmentCount, setSexualHarassmentCount] = useState(0);
 
-  const handleTranscription = (text: string, guide?: ResponseGuide | null) => {
+  const handleTranscription = (
+    text: string,
+    guide?: ResponseGuide | null,
+    reg?: Regulation | null
+  ) => {
+    // Store transcribed text
+    setTranscribedText(text);
     // If backend returned a guide, set it and show the warning toasts
     if (guide) {
       setResponseGuide(guide);
+      if (reg) {
+        setRegulation(reg);
+
+        // Detect violation type and increment counter
+        let violationType: "abuse" | "sexual_harassment" | null = null;
+        let currentCount = 0;
+
+        if (reg.subcategory && reg.subcategory.includes("폭언")) {
+          setAbuseCount((prev) => {
+            currentCount = prev + 1;
+            violationType = "abuse";
+            return currentCount;
+          });
+        } else if (reg.subcategory && reg.subcategory.includes("성희롱")) {
+          setSexualHarassmentCount((prev) => {
+            currentCount = prev + 1;
+            violationType = "sexual_harassment";
+            return currentCount;
+          });
+        }
+      }
 
       const agent_msg =
-        "공격적인 발언 감지\n고객님께 발언에 대한 신중성을 안내했습니다.";
-      const customer_msg =
-        "공격적인 표현이 감지되었습니다.\n차분하게 대화를 이어나가주세요.";
+        "부적절한 발언 감지\n고객님께 발언에 대한 신중성을 안내했습니다.";
+
+      // Determine customer message based on violation type and count
+      let customer_msg =
+        "부적절한 표현이 감지되었습니다.\n차분하게 대화를 이어나가주세요.";
+
+      // Check violation type and count to set appropriate message
+      if (reg?.subcategory?.includes("폭언")) {
+        if (abuseCount === 0) {
+          // First occurrence
+          customer_msg =
+            "폭언이 감지되었습니다.\n존중하는 마음으로 대화를 이어나가 주시기 바랍니다.";
+        } else if (abuseCount === 1) {
+          // Second occurrence
+          customer_msg =
+            "폭언이 반복 감지되었습니다.\n이용약관에 따라 통화가 종료될 수 있습니다.";
+        }
+      } else if (reg?.subcategory?.includes("성희롱")) {
+        if (sexualHarassmentCount === 0) {
+          // First occurrence
+          customer_msg =
+            "성희롱 표현이 감지되었습니다.\n건전한 통화 문화 유지를 부탁드립니다.";
+        } else if (sexualHarassmentCount === 1) {
+          // Second occurrence
+          customer_msg =
+            "성희롱이 반복 감지되었습니다.\n이용약관에 따라 통화가 종료될 수 있습니다.";
+        }
+      }
 
       // Show warnings when guide is generated
       toast.warning(agent_msg, {
@@ -127,6 +194,8 @@ export default function GentiChatInterface() {
                 <ReportBtn
                   audioFile={recordedFile}
                   onClearAudio={() => setRecordedFile(null)}
+                  regulation={regulation}
+                  text={transcribedText}
                 />
               </div>
 
