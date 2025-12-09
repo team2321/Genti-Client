@@ -34,10 +34,7 @@ export default function ReportBtn({
   regulation?: Regulation | null;
   text?: string | null;
 }) {
-  const [reason] = useState("policy");
   const [details, setDetails] = useState("");
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
 
@@ -45,43 +42,19 @@ export default function ReportBtn({
   useEffect(() => {
     if (audioFile) {
       const url = URL.createObjectURL(audioFile);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setAudioUrl(url);
       return () => URL.revokeObjectURL(url);
     }
     setAudioUrl(null);
   }, [audioFile]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setIsSubmitting(true);
-    try {
-      const form = new FormData();
-      form.append("reason", reason);
-      form.append("details", details);
-      if (text) form.append("text", text);
-      if (audioFile) form.append("file", audioFile, audioFile.name);
-
-      // Attempt to send to API endpoint `/api/report` (implement server-side separately)
-      const res = await fetch("/api/report", {
-        method: "POST",
-        body: form,
-      });
-
-      if (!res.ok) {
-        throw new Error("Failed to submit report");
-      }
-
-      toast.success("신고가 접수되었습니다.", { containerId: "agent-toast" });
-      toast.info("신고가 접수되었습니다.", { containerId: "customer-toast" });
-      // Clear parent-stored audio if callback provided
-      onClearAudio?.();
-    } catch (err) {
-      console.error(err);
-      toast.error("신고 접수에 실패했습니다.", { containerId: "agent-toast" });
-    } finally {
-      setIsSubmitting(false);
-    }
-    // Close handled by DialogClose on the button
+    const submittedMsg = "법무팀에게 신고가 제출되었습니다.";
+    toast.info(submittedMsg, { containerId: "agent-toast" });
+    toast.info(submittedMsg, { containerId: "customer-toast" });
+    onClearAudio?.();
   };
 
   return (

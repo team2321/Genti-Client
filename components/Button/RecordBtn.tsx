@@ -6,12 +6,20 @@ interface Props {
   onTranscription?: (text: string, guide?: any, regulation?: any) => void;
   setIsProcessing?: (v: boolean) => void;
   onAudio?: (file: File | null) => void;
+  testTextInput?: string;
+  onTestTextInputChange?: (value: string) => void;
+  onTestTextSubmit?: () => void;
+  isProcessing?: boolean;
 }
 
 export default function RecordBtn({
   onTranscription,
   setIsProcessing,
   onAudio,
+  testTextInput = "",
+  onTestTextInputChange,
+  onTestTextSubmit,
+  isProcessing = false,
 }: Props) {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const [recording, setRecording] = useState(false);
@@ -94,11 +102,11 @@ export default function RecordBtn({
   };
 
   return (
-    <div className="absolute bottom-8 left-8 z-20">
+    <div className="absolute bottom-8 left-8 z-20 flex gap-3 items-center">
       <button
         onClick={recording ? stopRecording : startRecording}
         disabled={isProcessingLocal}
-        className={`w-14 h-14 rounded-full flex items-center justify-center transition-all duration-300 transform hover:scale-110 ${
+        className={`w-14 h-14 rounded-full flex items-center justify-center transition-all duration-300 transform hover:scale-110 flex-shrink-0 ${
           recording
             ? "bg-red-500 hover:bg-red-600"
             : "bg-[#C4F15A] hover:bg-[#D5FF74]"
@@ -112,6 +120,27 @@ export default function RecordBtn({
           <FaMicrophone className="w-6 h-6 text-[#373737]" />
         )}
       </button>
+
+      {/* Test Text Input (Dev Mode) */}
+      <div className="flex gap-2 items-center">
+        <input
+          type="text"
+          value={testTextInput}
+          onChange={(e) => onTestTextInputChange?.(e.target.value)}
+          onKeyPress={(e) => {
+            if (e.key === "Enter") onTestTextSubmit?.();
+          }}
+          placeholder="테스트 텍스트 입력..."
+          className="px-3 py-2 text-sm border border-[#C4F15A] bg-[#2a2a2a] text-white rounded-md focus:outline-none focus:ring-2 focus:ring-[#C4F15A]"
+        />
+        <button
+          onClick={onTestTextSubmit}
+          disabled={isProcessing || !testTextInput.trim()}
+          className="px-3 py-2 text-sm bg-[#C4F15A] text-gray-900 font-bold rounded-md hover:bg-[#b8e64a] disabled:opacity-50 cursor-pointer flex-shrink-0"
+        >
+          전송
+        </button>
+      </div>
     </div>
   );
 }

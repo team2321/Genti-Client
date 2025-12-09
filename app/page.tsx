@@ -37,6 +37,7 @@ export default function GentiChatInterface() {
   const [transcribedText, setTranscribedText] = useState<string | null>(null);
   const [abuseCount, setAbuseCount] = useState(0);
   const [sexualHarassmentCount, setSexualHarassmentCount] = useState(0);
+  const [testTextInput, setTestTextInput] = useState("");
 
   const handleTranscription = (
     text: string,
@@ -123,17 +124,49 @@ export default function GentiChatInterface() {
     }
   };
 
+  // Test with text input - directly call the API with text
+  const handleTestTextSubmit = async () => {
+    if (!testTextInput.trim()) return;
+
+    setIsProcessing(true);
+    try {
+      const response = await fetch("/api/stt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: testTextInput }),
+      });
+
+      const data = await response.json();
+      if (data) {
+        handleTranscription(
+          data.text ?? testTextInput,
+          data.guide ?? null,
+          data.regulation ?? null
+        );
+      }
+      setTestTextInput("");
+    } catch (error) {
+      console.error("Error:", error);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   return (
-    <div className="flex h-screen bg-[#373737] grid grid-cols-[2fr_1fr]">
+    <div className="flex h-screen bg-[#373737] flex-col md:grid md:grid-cols-[3fr_1fr]">
       {/* Floating Mic Button - Bottom Left */}
       <RecordBtn
         onTranscription={handleTranscription}
         setIsProcessing={setIsProcessing}
         onAudio={(f) => setRecordedFile(f)}
+        testTextInput={testTextInput}
+        onTestTextInputChange={setTestTextInput}
+        onTestTextSubmit={handleTestTextSubmit}
+        isProcessing={isProcessing}
       />
 
       {/* Agent View */}
-      <div className="flex flex-col h-full">
+      <div className="flex flex-col h-full w-full md:w-auto">
         {/* Toast container for Agent view */}
         <ToastContainer
           containerId="agent-toast"
@@ -150,17 +183,17 @@ export default function GentiChatInterface() {
         />
 
         {/* Header */}
-        <div className="bg-[#373737] px-6 py-4 border-b border-[#939393] fixed w-full">
+        <div className="bg-[#373737] px-4 md:px-6 py-4 border-b border-[#939393] w-full">
           <Image src="/genti-logo.svg" alt="logo" width={80} height={40} />
         </div>
 
-        <div className="flex-1 overflow-y-auto px-6 py-10 min-h-full flex flex-col items-center justify-center relative">
+        <div className="flex-1 overflow-y-auto px-4 md:px-6 py-10 md:py-2 flex flex-col items-center justify-center relative">
           {/* Loading overlay */}
           {isProcessing && (
             <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/50">
               <div className="flex flex-col items-center gap-4">
                 <SyncLoader color="#C4F15A" />
-                <div className="text-white font-semibold">
+                <div className="text-white font-semibold text-sm md:text-base">
                   음성 인식 및 응답 생성 중...
                 </div>
               </div>
@@ -169,24 +202,24 @@ export default function GentiChatInterface() {
 
           {/* Only show content if responseGuide exists */}
           {responseGuide ? (
-            <div className="max-w-3xl w-full">
+            <div className="max-w-3xl w-full px-2 md:px-0">
               {/* Title */}
               <div>
-                <p className="text-[#C4F15A] text-base font-bold mb-6">
+                <p className="text-[#C4F15A] text-sm md:text-base font-bold mb-4 md:mb-6">
                   상황 요약
                 </p>
-                <p className="text-white text-lg leading-relaxed font-semibold">
+                <p className="text-white text-base md:text-lg leading-relaxed font-semibold">
                   {responseGuide.situation}
                 </p>
               </div>
 
               {/* Step by step guidance */}
-              <div className="flex mt-15 justify-between">
-                <div>
-                  <p className="text-[#C4F15A] text-base font-bold">
+              <div className="flex flex-col md:flex-row mt-8 md:mt-15 md:justify-between gap-4 md:gap-0">
+                <div className="flex-1">
+                  <p className="text-[#C4F15A] text-sm md:text-base font-bold">
                     단계별 대응 요령 안내
                   </p>
-                  <span className="text-[#B3B3B3] text-sm font-bold flex items-center space-x-1">
+                  <span className="text-[#B3B3B3] text-xs md:text-sm font-bold flex items-center space-x-1">
                     <RiErrorWarningFill className="text-[#B3B3B3]" />
                     <span>신고 가능한 발언입니다.</span>
                   </span>
@@ -210,11 +243,11 @@ export default function GentiChatInterface() {
                         <div className="bg-[#C4F15A] text-gray-900 text-xs font-bold px-1 py-0.5 rounded w-fit">
                           NOW
                         </div>
-                        <p className="text-lg text-white font-bold">
+                        <p className="text-base md:text-lg text-white font-bold">
                           {responseGuide.current_action}
                         </p>
                       </div>
-                      <div className="ml-5 mt-2 p-4 bg-[#C4F15A] text-gray-900 rounded-lg relative before:content-[''] before:absolute before:right-full before:top-7 before:border-8 before:border-transparent before:border-r-[#C4F15A] max-w-sm text-sm font-semibold">
+                      <div className="ml-3 md:ml-5 mt-2 p-3 md:p-4 bg-[#C4F15A] text-gray-900 rounded-lg relative before:content-[''] before:absolute before:right-full before:top-7 before:border-8 before:border-transparent before:border-r-[#C4F15A] max-w-xs md:max-w-sm text-xs md:text-sm font-semibold">
                         {responseGuide.current_script}
                       </div>
                     </div>
@@ -225,7 +258,7 @@ export default function GentiChatInterface() {
                     <div key={index} className="relative flex items-start">
                       <div className="flex-shrink-0 w-6 h-6 rounded-full bg-[#C4F15A] z-10 mt-1"></div>
                       <div className="ml-5 flex-1 pt-0.5">
-                        <p className="text-lg font-semibold text-gray-200">
+                        <p className="text-base md:text-lg font-semibold text-gray-200">
                           {step}
                         </p>
                       </div>
@@ -244,7 +277,7 @@ export default function GentiChatInterface() {
       </div>
 
       {/* Customer view */}
-      <div className="flex-1 bg-gray-700 flex flex-col items-center justify-center relative overflow-hidden">
+      <div className="hidden md:flex flex-1 bg-gray-700 flex-col items-center justify-center relative overflow-hidden">
         {/* Toast container for Customer view */}
         <ToastContainer
           containerId="customer-toast"
@@ -260,11 +293,17 @@ export default function GentiChatInterface() {
           className="customer-toast-container whitespace-pre-line text-sm font-bold"
           progressClassName="!bg-white"
           style={{
-            left: "83.33%",
+            left: "88.33%",
             transform: "translateX(-50%)",
           }}
         />
-        <Image src="/call.png" width={480} height={160} alt="Call interface" />
+        <Image
+          src="/call.png"
+          width={480}
+          height={160}
+          alt="Call interface"
+          className="h-full"
+        />
       </div>
     </div>
   );
