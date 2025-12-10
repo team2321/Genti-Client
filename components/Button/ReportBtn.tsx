@@ -13,16 +13,28 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "react-toastify";
 
+interface Regulation {
+  category: string;
+  subcategory: string;
+  regulation: string;
+  article: string;
+  content: string;
+  penalty: string;
+  score: number;
+}
+
 export default function ReportBtn({
   audioFile,
   onClearAudio,
+  regulation,
+  text,
 }: {
   audioFile?: File | null;
   onClearAudio?: () => void;
+  regulation?: Regulation | null;
+  text?: string | null;
 }) {
-  const [reason, setReason] = useState("policy");
   const [details, setDetails] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
 
@@ -30,42 +42,19 @@ export default function ReportBtn({
   useEffect(() => {
     if (audioFile) {
       const url = URL.createObjectURL(audioFile);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setAudioUrl(url);
       return () => URL.revokeObjectURL(url);
     }
     setAudioUrl(null);
   }, [audioFile]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setIsSubmitting(true);
-    try {
-      const form = new FormData();
-      form.append("reason", reason);
-      form.append("details", details);
-      if (audioFile) form.append("file", audioFile, audioFile.name);
-
-      // Attempt to send to API endpoint `/api/report` (implement server-side separately)
-      const res = await fetch("/api/report", {
-        method: "POST",
-        body: form,
-      });
-
-      if (!res.ok) {
-        throw new Error("Failed to submit report");
-      }
-
-      toast.success("신고가 접수되었습니다.", { containerId: "agent-toast" });
-      toast.info("신고가 접수되었습니다.", { containerId: "customer-toast" });
-      // Clear parent-stored audio if callback provided
-      onClearAudio?.();
-    } catch (err) {
-      console.error(err);
-      toast.error("신고 접수에 실패했습니다.", { containerId: "agent-toast" });
-    } finally {
-      setIsSubmitting(false);
-    }
-    // Close handled by DialogClose on the button
+    const submittedMsg = "법무팀에게 신고가 제출되었습니다.";
+    toast.info(submittedMsg, { containerId: "agent-toast" });
+    toast.info(submittedMsg, { containerId: "customer-toast" });
+    onClearAudio?.();
   };
 
   return (
@@ -86,18 +75,46 @@ export default function ReportBtn({
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="flex flex-col">
-              <label className="text-sm font-semibold mb-1">신고 유형</label>
-              <select
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                className="rounded-md border px-3 py-2 bg-white text-sm"
-              >
-                <option value="policy">정책 위반 (욕설/혐오 발언)</option>
-                <option value="harassment">괴롭힘/위협</option>
-                <option value="fraud">사기/오도</option>
-                <option value="other">기타</option>
-              </select>
+              <label className="text-sm font-semibold">신고 유형</label>
             </div>
+
+            {/* Transcribed text display */}
+            {text && (
+              <div className="flex flex-col">
+                <label className="text-sm font-semibold mb-2">발언 내용</label>
+                <div className="bg-gray-50 border border-gray-300 rounded-md p-3 text-sm text-gray-700 max-h-24 overflow-y-auto whitespace-pre-wrap">
+                  {text}
+                </div>
+              </div>
+            )}
+
+            {/* Regulation info card - show if available */}
+            {regulation && (
+              <div className="bg-[#FFF9E6] border border-[#FFE4A3] rounded-lg p-4 space-y-2">
+                <div className="flex items-start gap-2">
+                  <div className="flex-shrink-0 w-2 h-2 rounded-full bg-[#F59E0B] mt-1.5" />
+                  <div className="flex-1">
+                    <div className="flex gap-2 items-center mb-1">
+                      <span className="text-xs font-bold text-[#92400E] bg-[#FDE68A] px-2 py-0.5 rounded">
+                        {regulation.regulation}
+                      </span>
+                      <span className="text-xs font-semibold text-[#92400E]">
+                        {regulation.subcategory}
+                      </span>
+                    </div>
+                    <p className="text-sm text-gray-700 leading-relaxed mb-2">
+                      {regulation.content}
+                    </p>
+                    {regulation.penalty && regulation.penalty !== "-" && (
+                      <div className="text-xs text-[#92400E] bg-[#FEF3C7] px-2 py-1 rounded inline-block">
+                        <span className="font-semibold">처벌: </span>
+                        {regulation.penalty}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="flex flex-col">
               <label className="text-sm font-semibold mb-1">상세 내용</label>
