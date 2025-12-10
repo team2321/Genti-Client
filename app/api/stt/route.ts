@@ -16,9 +16,14 @@ export const runtime = "nodejs";
 let ffmpegPath = ffmpegInstaller;
 
 // 만약 경로가 이상하게(\ROOT...) 잡히거나 윈도우 환경이라면 강제로 절대 경로를 만듭니다.
-if (process.platform === 'win32') {
+if (process.platform === "win32") {
   // 현재 프로젝트 폴더(process.cwd())를 기준으로 실제 파일 위치를 찾습니다.
-  ffmpegPath = path.join(process.cwd(), 'node_modules', 'ffmpeg-static', 'ffmpeg.exe');
+  ffmpegPath = path.join(
+    process.cwd(),
+    "node_modules",
+    "ffmpeg-static",
+    "ffmpeg.exe"
+  );
 }
 
 // fluent-ffmpeg에 설정
@@ -37,6 +42,7 @@ interface AnalysisResult {
 }
 
 interface SafetyResponse {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   blocklistsMatch: any[];
   categoriesAnalysis: AnalysisResult[];
   error?: { code: string; message: string };
@@ -69,12 +75,16 @@ async function getAllSubcategories(): Promise<string[]> {
   const indexName = "report-index";
 
   try {
-    const searchClient = new SearchClient(searchEndpoint, indexName, new AzureKeyCredential(searchKey));
-    
+    const searchClient = new SearchClient(
+      searchEndpoint,
+      indexName,
+      new AzureKeyCredential(searchKey)
+    );
+
     // facets 요청: 검색 결과는 0개로 하고(top:0), subcategory 필드의 종류만 가져옴
     const results = await searchClient.search("*", {
       top: 0,
-      facets: ["subcategory"], 
+      facets: ["subcategory"],
     });
 
     if (results.facets && results.facets.subcategory) {
@@ -90,12 +100,15 @@ async function getAllSubcategories(): Promise<string[]> {
 
 // ==========================================================================
 // OpenAI를 이용해 발화 내용을 csv의 특정 subcategory로 분류하기
-async function identifySubcategoryWithGPT(text: string, subcategories: string[]): Promise<string | null> {
+async function identifySubcategoryWithGPT(
+  text: string,
+  subcategories: string[]
+): Promise<string | null> {
   const apiKey = process.env.AZURE_OPENAI_KEY!;
   const endpoint = process.env.AZURE_OPENAI_ENDPOINT!;
-  const deploymentName = "smu-team6-gpt-4o-mini"; 
+  const deploymentName = "smu-team6-gpt-4o-mini";
   const apiVersion = "2024-02-15-preview";
-  
+
   const url = `${endpoint}openai/deployments/${deploymentName}/chat/completions?api-version=${apiVersion}`;
 
   const categoryListStr = subcategories.join(", ");
@@ -120,10 +133,10 @@ async function identifySubcategoryWithGPT(text: string, subcategories: string[])
       body: JSON.stringify({
         messages: [
           { role: "system", content: systemPrompt },
-          { role: "user", content: `고객 발화: "${text}"` }
+          { role: "user", content: `고객 발화: "${text}"` },
         ],
         temperature: 0.1,
-        max_tokens: 50
+        max_tokens: 50,
       }),
     });
 
@@ -138,20 +151,22 @@ async function identifySubcategoryWithGPT(text: string, subcategories: string[])
 
     // 구조 방어 코드
     if (!data.choices || !data.choices[0]) {
-        console.error("❌ Unexpected OpenAI Response:", JSON.stringify(data, null, 2));
-        return null;
+      console.error(
+        "❌ Unexpected OpenAI Response:",
+        JSON.stringify(data, null, 2)
+      );
+      return null;
     }
 
     const result = data.choices[0].message.content.trim();
-    
+
     // 결과가 목록에 있는지 검증
     if (subcategories.includes(result)) {
-        return result;
+      return result;
     }
-    
+
     console.warn(`⚠️ OpenAI returned unknown category: ${result}`);
     return null;
-
   } catch (error) {
     console.error("❌ OpenAI Classification Error:", error);
     return null;
@@ -160,31 +175,46 @@ async function identifySubcategoryWithGPT(text: string, subcategories: string[])
 
 // ==========================================================================
 // 분류된 Subcategory로 규정 검색 (Filter 사용)
-async function searchRegulationByCategory(targetSubcategory: string): Promise<RegulationInfo | null> {
+async function searchRegulationByCategory(
+  targetSubcategory: string
+): Promise<RegulationInfo | null> {
   const searchEndpoint = process.env.AZURE_SEARCH_ENDPOINT!;
   const searchKey = process.env.AZURE_SEARCH_KEY!;
   const indexName = "report-index";
 
   try {
-    const searchClient = new SearchClient(searchEndpoint, indexName, new AzureKeyCredential(searchKey));
+    const searchClient = new SearchClient(
+      searchEndpoint,
+      indexName,
+      new AzureKeyCredential(searchKey)
+    );
 
     // 텍스트 검색이 아닌 필터(Filter) 검색 사용
     // subcategory 필드가 정확히 targetSubcategory와 일치하는 문서를 찾음
     const searchResults = await searchClient.search("*", {
       top: 5, // 최대 5개 결과
       filter: `subcategory eq '${targetSubcategory.replace(/'/g, "''")}'`, // OData Filter 구문
-      select: ["category", "subcategory", "regulation", "article", "content", "penalty"],
+      select: [
+        "category",
+        "subcategory",
+        "regulation",
+        "article",
+        "content",
+        "penalty",
+      ],
     });
 
     for await (const result of searchResults.results) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const doc = result.document as Record<string, any>;
       return {
-        category: result.document.category as string,
-        subcategory: result.document.subcategory as string,
-        regulation: result.document.regulation as string,
-        article: result.document.article as string,
-        content: result.document.content as string,
-        penalty: result.document.penalty as string,
-        score: result.score
+        category: doc.category as string,
+        subcategory: doc.subcategory as string,
+        regulation: doc.regulation as string,
+        article: doc.article as string,
+        content: doc.content as string,
+        penalty: doc.penalty as string,
+        score: result.score,
       };
     }
     return null;
@@ -196,15 +226,18 @@ async function searchRegulationByCategory(targetSubcategory: string): Promise<Re
 
 // ==========================================================================
 // Azure OpenAI 대응 가이드 생성 함수
-async function generateResponseGuide(sttText: string, safetyResult: SafetyResponse): Promise<ResponseGuide | null> {
-    const apiKey = process.env.AZURE_OPENAI_KEY!;
-    const endpoint = process.env.AZURE_OPENAI_ENDPOINT!;
-    const deploymentName = "smu-team6-gpt-4o-mini";
-    const apiVersion = "2024-02-15-preview";
+async function generateResponseGuide(
+  sttText: string,
+  safetyResult: SafetyResponse
+): Promise<ResponseGuide | null> {
+  const apiKey = process.env.AZURE_OPENAI_KEY!;
+  const endpoint = process.env.AZURE_OPENAI_ENDPOINT!;
+  const deploymentName = "smu-team6-gpt-4o-mini";
+  const apiVersion = "2024-02-15-preview";
 
-    const url = `${endpoint}openai/deployments/${deploymentName}/chat/completions?api-version=${apiVersion}`;
+  const url = `${endpoint}openai/deployments/${deploymentName}/chat/completions?api-version=${apiVersion}`;
 
-    const systemPrompt = `당신은 콜센터 상담원을 지원하는 전문 어시스턴트입니다.
+  const systemPrompt = `당신은 콜센터 상담원을 지원하는 전문 어시스턴트입니다.
 
 목적:
 - 고객의 공격적·모욕적 발화를 들은 상담원이 감정적으로 휘둘리지 않고, 회사 매뉴얼에 맞게 침착하게 대응하도록 '상황 요약'과 '단계별 응대 가이드'를 생성하는 것이 당신의 역할입니다.
@@ -233,17 +266,17 @@ async function generateResponseGuide(sttText: string, safetyResult: SafetyRespon
   "next_steps": ["2단계...", "3단계...", "4단계..."]
 }`;
 
-    const fetchOpenAI = async (inputText: string) => {
+  const fetchOpenAI = async (inputText: string) => {
     return await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", "api-key": apiKey },
       body: JSON.stringify({
         messages: [
           { role: "system", content: systemPrompt },
-          { role: "user", content: `고객 발화: ${inputText}` }
+          { role: "user", content: `고객 발화: ${inputText}` },
         ],
         temperature: 0.7,
-        max_tokens: 600
+        max_tokens: 600,
       }),
     });
   };
@@ -253,12 +286,14 @@ async function generateResponseGuide(sttText: string, safetyResult: SafetyRespon
     let response = await fetchOpenAI(sttText);
 
     if (response.status === 400) {
-      console.warn("⚠️ OpenAI blocked raw text (Content Filter). Retrying with sanitized description...");
+      console.warn(
+        "⚠️ OpenAI blocked raw text (Content Filter). Retrying with sanitized description..."
+      );
       const detectedCategories = safetyResult.categoriesAnalysis
-        .filter(c => c.severity > 0)
-        .map(c => `${c.category} (Severity: ${c.severity})`)
+        .filter((c) => c.severity > 0)
+        .map((c) => `${c.category} (Severity: ${c.severity})`)
         .join(", ");
-        
+
       const sanitizedText = `(The user input was blocked by safety filters. Detected: ${detectedCategories}. Please provide a general guide for this type of aggression.)`;
       response = await fetchOpenAI(sanitizedText);
     }
@@ -272,15 +307,11 @@ async function generateResponseGuide(sttText: string, safetyResult: SafetyRespon
     const data = await response.json();
     const content = data.choices[0].message.content;
     return JSON.parse(content);
-
   } catch (error) {
     console.error("Error generating guide:", error);
     return null;
   }
-
 }
-
-
 
 // API Handler
 export async function POST(req: Request) {
@@ -361,7 +392,7 @@ export async function POST(req: Request) {
       const safetyEndpoint = process.env.AZURE_CONTENT_SAFETY_ENDPOINT!;
       const safetyKey = process.env.AZURE_CONTENT_SAFETY_KEY!;
       const apiVersion = "2024-09-01";
-      
+
       const safetyUrl = `${safetyEndpoint}/contentsafety/text:analyze?api-version=${apiVersion}`;
 
       const safetyResponse = await fetch(safetyUrl, {
@@ -378,7 +409,9 @@ export async function POST(req: Request) {
       });
 
       if (!safetyResponse.ok) {
-        throw new Error(`Content Safety API Error: ${safetyResponse.statusText}`);
+        throw new Error(
+          `Content Safety API Error: ${safetyResponse.statusText}`
+        );
       }
 
       const safetyResult: SafetyResponse = await safetyResponse.json();
@@ -417,46 +450,64 @@ export async function POST(req: Request) {
       let regulationResult: RegulationInfo | null = null;
 
       if (finalAction === "Reject") {
-        console.log("🚨 Unsafe content detected. Starting analysis workflow...");
+        console.log(
+          "🚨 Unsafe content detected. Starting analysis workflow..."
+        );
 
         // OpenAI 대응 가이드 생성
         const guidePromise = generateResponseGuide(result.text, safetyResult);
 
         // Search Service 규정 검색 프로세스 (Search Service 인덱스의 Subcategory 목록 조회 -> Azure OpenAI GPT 분류 -> 검색)
         const regulationPromise = (async () => {
-            console.log("📂 Fetching subcategories from index...");
-            // 1. 인덱스에 있는 모든 subcategory 종류를 가져옴
-            const subcategories = await getAllSubcategories();
-            
-            if (subcategories.length > 0) {
-                console.log(`🤖 Classifying text into: [${subcategories.join(", ")}]`);
-                // 2. GPT를 통해 텍스트가 어떤 subcategory인지 판단
-                const detectedSubcategory = await identifySubcategoryWithGPT(result.text, subcategories);
-                
-                if (detectedSubcategory) {
-                    console.log(`✅ Identified Subcategory: "${detectedSubcategory}"`);
-                    // 3. 해당 subcategory로 규정 문서 검색 (Filter)
-                    return await searchRegulationByCategory(detectedSubcategory);
-                } else {
-                    console.warn("⚠️ GPT could not classify the subcategory.");
-                    return null;
-                }
+          console.log("📂 Fetching subcategories from index...");
+          // 1. 인덱스에 있는 모든 subcategory 종류를 가져옴
+          const subcategories = await getAllSubcategories();
+
+          if (subcategories.length > 0) {
+            console.log(
+              `🤖 Classifying text into: [${subcategories.join(", ")}]`
+            );
+            // 2. GPT를 통해 텍스트가 어떤 subcategory인지 판단
+            const detectedSubcategory = await identifySubcategoryWithGPT(
+              result.text,
+              subcategories
+            );
+
+            if (detectedSubcategory) {
+              console.log(
+                `✅ Identified Subcategory: "${detectedSubcategory}"`
+              );
+              // 3. 해당 subcategory로 규정 문서 검색 (Filter)
+              return await searchRegulationByCategory(detectedSubcategory);
             } else {
-                console.warn("⚠️ No subcategories found in the index.");
-                return null;
+              console.warn("⚠️ GPT could not classify the subcategory.");
+              return null;
             }
+          } else {
+            console.warn("⚠️ No subcategories found in the index.");
+            return null;
+          }
         })();
 
         // 두 작업을 병렬로 처리하여 속도 최적화
-        const [guide, regulation] = await Promise.all([guidePromise, regulationPromise]);
-        
+        const [guide, regulation] = await Promise.all([
+          guidePromise,
+          regulationPromise,
+        ]);
+
         guideResult = guide;
         regulationResult = regulation;
 
         // 가이드 데이터 포맷팅
         if (guideResult) {
-          if (guideResult.current_action) guideResult.current_action = guideResult.current_action.replace(/^\d+단계:\s*/, '').trim();
-          if (guideResult.next_steps) guideResult.next_steps = guideResult.next_steps.map(step => step.replace(/^\d+단계:\s*/, '').trim());
+          if (guideResult.current_action)
+            guideResult.current_action = guideResult.current_action
+              .replace(/^\d+단계:\s*/, "")
+              .trim();
+          if (guideResult.next_steps)
+            guideResult.next_steps = guideResult.next_steps.map((step) =>
+              step.replace(/^\d+단계:\s*/, "").trim()
+            );
         }
       }
 
@@ -467,16 +518,18 @@ export async function POST(req: Request) {
         safetyDetails: actionDetails,
         rawSafetyResult: safetyResult,
         guide: guideResult,
-        regulation: regulationResult 
+        regulation: regulationResult,
       };
 
       // JSON 출력
-      console.log("📦 Final JSON Response:\n", JSON.stringify(responsePayload, null, 2));
+      console.log(
+        "📦 Final JSON Response:\n",
+        JSON.stringify(responsePayload, null, 2)
+      );
 
       // 클라이언트에게 반환
       return NextResponse.json(responsePayload);
       // ============================================================
-      
     } else if (result.reason === sdk.ResultReason.NoMatch) {
       console.log("No speech could be recognized");
       return NextResponse.json({ text: "", error: "No speech recognized" });
