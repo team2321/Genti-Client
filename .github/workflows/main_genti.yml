@@ -11,7 +11,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     permissions:
       contents: read #This is required for actions/checkout
 
@@ -28,7 +28,7 @@ jobs:
           npm install
           npm run build --if-present
           npm run test --if-present
-
+      
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
         with:
@@ -51,13 +51,13 @@ jobs:
       - name: Login to Azure
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_266FA3EA40934BA5A28EA08E9C5AC7FD }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_6F8C2E50D653485C9E001F3111896B26 }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_BC67846C7A0C4F8987831AEFB8283A7D }}
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_B3774B3176B54EBCAFC4EFC6C048C47C }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_B24AE473FF624D94A1B1842EF52F82C1 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_7045205933C8401695E2B3077006F4F2 }}
 
       - name: 'Deploy to Azure Web App'
-        id: deploy-to-webapp
         uses: azure/webapps-deploy@v3
+        id: deploy-to-webapp
         with:
           app-name: 'genti'
           slot-name: 'Production'
